@@ -1,9 +1,11 @@
-﻿using System.IO;
+﻿using System;
+using System.IO;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.Extensions.Caching.Memory;
-
+using Microsoft.VisualBasic;
 using StackExchange.Redis;
 
 namespace RedisOutputCachingMiddleware
@@ -11,28 +13,43 @@ namespace RedisOutputCachingMiddleware
     public class OutputCachingMiddleware
     {
         private readonly RequestDelegate _next;
-        private readonly IMemoryCache _memoryCache;
-        private readonly string _redisConnectionString;
+        private readonly IDatabase _cache;
 
-        public OutputCachingMiddleware(RequestDelegate next,
-                                            IMemoryCache memoryCache, string redisConnectionString)
+        public OutputCachingMiddleware(RequestDelegate next, string redisConnectionString)
         {
             _next = next;
-            _memoryCache = memoryCache;
-            // store the connection string 
-            _redisConnectionString = redisConnectionString;
+            _cache = ConnectAsync(redisConnectionString).Result;
+        }
+
+        public static async Task<IDatabase> ConnectAsync(string redisConnectionString)
+        {
+            try
+            {
+                var connection = await ConnectionMultiplexer.ConnectAsync(redisConnectionString);
+                return connection.GetDatabase();
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+            
         }
 
         public async Task InvokeAsync(HttpContext context)
         {
             // use the path and query as a key
-            var pathAndQuery = context.Request.GetEncodedPathAndQuery();
-
-            // true if using cache, false otherwise
-            if (await TryToUseCachedData(context, pathAndQuery))
+            // TODO url, header, request body
+            RedisKey key = context.Request.GetEncodedPathAndQuery() + context.Request.Headers + context.Request.Body;
+            RedisValue value = await GetCache(key);
+            
+            if (!value.IsNullOrEmpty)
+            {
+                await context.Response.WriteAsync(value);
                 return;
-
+            }
+                
             HttpResponse response = context.Response;
+            // TODO check if response created
             Stream originalStream = response.Body;
 
             try
@@ -46,7 +63,8 @@ namespace RedisOutputCachingMiddleware
                     // convert the output to a byte array
                     byte[] bytes = ms.ToArray();
                     // cache the output
-                    await CacheResponseOnSuccess(context, pathAndQuery, bytes);
+                    RedisValue redisValue = bytes;
+                    await SetCache(key, redisValue);
 
                     if (ms.Length > 0)
                     {
@@ -62,31 +80,28 @@ namespace RedisOutputCachingMiddleware
             }
         }
 
-        private async Task<bool> TryToUseCachedData(HttpContext context, string pathAndQuery)
+        private async Task<RedisValue> GetCache(RedisKey key)
         {
-            using (var connection = await ConnectionMultiplexer.ConnectAsync(_redisConnectionString))
+            try
             {
-                var cache = connection.GetDatabase();
-                var value = await cache.StringGetAsync(pathAndQuery);
-                // boolean to determine if key exists
-                var found = !value.IsNullOrEmpty;
-
-                if (found)
-                {
-                    await context.Response.WriteAsync(value);
-                }
-
-                return found;
+                return await _cache.StringGetAsync(key);
             }
+            catch (Exception ex)
+            {
+                return RedisValue.Null;
+            }
+            
         }
 
-        private async Task CacheResponseOnSuccess(HttpContext context, string pathAndQuery, byte[] bytes)
+        private async Task SetCache(RedisKey key, RedisValue value)
         {
-            using (var connection = await ConnectionMultiplexer.ConnectAsync(_redisConnectionString))
+            try
             {
-                var cache = connection.GetDatabase();
-                // cache the result
-                var result = await cache.StringSetAsync(pathAndQuery, bytes);
+                await _cache.StringSetAsync(key, value);
+            }
+            catch (Exception ex)
+            {
+                
             }
         }
 
