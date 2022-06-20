@@ -3,11 +3,20 @@
 // Licensed under the MIT License. See License.txt in the project root for license information.
 //
 
+using System;
 using System.IO;
+using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 
 namespace Microsoft.Web.Redis
 {
+    public class RedisSerializationBinder : SerializationBinder
+    {
+        public override Type BindToType(string assemblyName, string typeName)
+        {
+            return null;
+        }
+    }
     public class BinarySerializer : ISerializer
     {
         public byte[] Serialize(object data)
@@ -32,10 +41,13 @@ namespace Microsoft.Web.Redis
                 return null;
             }
             var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Binder = new RedisSerializationBinder();
             using (var memoryStream = new MemoryStream(data, 0, data.Length))
             {
                 memoryStream.Seek(0, SeekOrigin.Begin);
-                object retObject = (object)binaryFormatter.Deserialize(memoryStream);
+#pragma warning disable CA2300 // Do not use insecure deserializer BinaryFormatter
+                object retObject = binaryFormatter.Deserialize(memoryStream);
+#pragma warning restore CA2300 // Do not use insecure deserializer BinaryFormatter
                 if (retObject.GetType() == typeof(RedisNull))
                 {
                     return null;
