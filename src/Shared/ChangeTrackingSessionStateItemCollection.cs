@@ -61,12 +61,6 @@ namespace Microsoft.Web.Redis
             return deletedKeys;
         }
 
-        public ChangeTrackingSessionStateItemCollection(RedisUtility utility)
-        {
-            _utility = utility;
-            innerCollection = new SessionStateItemCollection();
-        }
-
         public void Clear()
         {
             foreach (string key in innerCollection.Keys) 
@@ -149,49 +143,22 @@ namespace Microsoft.Web.Redis
 
         private object GetData(string normalizedName)
         {
-            ValueWrapper valueWrapper = (ValueWrapper) innerCollection[normalizedName];
-            if (valueWrapper != null)
-            {
-                object actualValue = valueWrapper.GetActualValue(_utility);
-                // if actualValue is mutable then add it to modified list even during get operation
-                if (actualValue != null && !actualValue.GetType().IsValueType && actualValue.GetType() != typeof(string))
-                {
-                    AddInModifiedKeys(normalizedName);
-                }
-                return actualValue;
-            }
             return null;
         }
 
         private void SetData(string normalizedName, object value)
         {
-            AddInModifiedKeys(normalizedName);
-            ValueWrapper valueWrapper = (ValueWrapper) innerCollection[normalizedName];
-            if (valueWrapper != null)
-            {
-                valueWrapper.SetActualValue(value);
-            }
-            else
-            {
-                innerCollection[normalizedName] = new ValueWrapper(value);
-            }
         }
 
         internal void SetDataWithoutUpdatingModifiedKeys(string name, byte[] value)
         {
-            name = GetSessionNormalizedKeyToUse(name);
-            innerCollection[name] = new ValueWrapper(value);
+
         }
 
         internal object GetDataWithoutUpdatingModifiedKeys(string name)
         {
-            name = GetSessionNormalizedKeyToUse(name);
-            ValueWrapper valueWrapper = (ValueWrapper)innerCollection[name];
-            if (valueWrapper != null)
-            {
-                return valueWrapper.GetActualValue(_utility);
-            }
-            return null;;
+
+            return null;
         }
 
         public override IEnumerator GetEnumerator()

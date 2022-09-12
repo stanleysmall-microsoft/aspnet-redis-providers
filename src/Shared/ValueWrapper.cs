@@ -22,10 +22,6 @@ namespace Microsoft.Web.Redis
 
         public object GetActualValue(RedisUtility utility)
         {
-            if (_actualValue == null)
-            {
-                _actualValue = utility.GetObjectFromBytes(_serializedvalue);
-            }
             return _actualValue;
         }
 

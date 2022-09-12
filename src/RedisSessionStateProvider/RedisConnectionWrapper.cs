@@ -13,7 +13,6 @@ namespace Microsoft.Web.Redis
     {
         internal static RedisSharedConnection sharedConnection;
         static object lockForSharedConnection = new object();
-        internal static RedisUtility redisUtility;
 
         public KeyGenerator Keys { set; get; }
         
@@ -34,11 +33,10 @@ namespace Microsoft.Web.Redis
                     if (sharedConnection == null)
                     {
                         sharedConnection = new RedisSharedConnection(configuration);
-                        redisUtility = new RedisUtility(configuration);
                     }
                 }
             }
-            redisConnection = new StackExchangeClientConnection(configuration, redisUtility, sharedConnection);
+            redisConnection = new StackExchangeClientConnection(configuration, sharedConnection);
         }
 
         public TimeSpan GetLockAge(object lockId)
@@ -111,17 +109,7 @@ namespace Microsoft.Web.Redis
             valueArgs = null;
             if (data != null && data.Count > 0)
             {
-                ChangeTrackingSessionStateItemCollection sessionItems = (ChangeTrackingSessionStateItemCollection)data;
-                List<object> list = redisUtility.GetNewItemsAsList(sessionItems);
-                if (list.Count > 0)
-                {
-                    keyArgs = new string[] { Keys.DataKey, Keys.InternalKey };
-                    valueArgs = new object[list.Count + 2]; // this +2 is for first 2 values in ARGV that we will add now
-                    valueArgs[0] = list.Count + 2;
-                    valueArgs[1] = sessionTimeout;
-                    list.CopyTo(valueArgs, 2);
-                    return true;
-                }
+                SessionStateItemCollection sessionItems = (SessionStateItemCollection)data;
             }
             return false;
         }
@@ -325,27 +313,7 @@ namespace Microsoft.Web.Redis
             if (data != null)
             {
                 List<object> list = new List<object>();
-                ChangeTrackingSessionStateItemCollection sessionItems = (ChangeTrackingSessionStateItemCollection)data;
-                int noOfItemsRemoved = redisUtility.AppendRemoveItemsInList(sessionItems, list);
-                int noOfItemsUpdated = redisUtility.AppendUpdatedOrNewItemsInList(sessionItems, list);
-
-                keyArgs = new string[] { Keys.LockKey, Keys.DataKey, Keys.InternalKey };
-                valueArgs = new object[list.Count + 8]; // this +8 is for first wight values in ARGV that we will add now
-                valueArgs[0] = lockId ?? "";
-                valueArgs[1] = sessionTimeout;
-                valueArgs[2] = noOfItemsRemoved;
-                valueArgs[3] = 9; // In Lua index starts from 1 so first item deleted will be 9th.
-                valueArgs[4] = noOfItemsRemoved + 8; // index for last removed item
-                valueArgs[5] = noOfItemsUpdated;
-                valueArgs[6] = noOfItemsRemoved + 9; // first item updated will be next to last item removed
-                valueArgs[7] = list.Count + 8; // index for last item in list in LUA
-                
-                // if nothing is changed in session then also execute update script to update session timeout
-                if (list.Count != 0)
-                {
-                    list.CopyTo(valueArgs, 8);
-                }
-                return true;
+                SessionStateItemCollection sessionItems = (SessionStateItemCollection)data;
             }
             return false;
         }

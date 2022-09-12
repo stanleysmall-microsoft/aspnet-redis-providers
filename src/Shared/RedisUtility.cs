@@ -50,37 +50,13 @@ namespace Microsoft.Web.Redis
         public int AppendUpdatedOrNewItemsInList(ChangeTrackingSessionStateItemCollection sessionItems, List<object> list)
         {
             int noOfItemsUpdated = 0;
-            if (sessionItems.GetModifiedKeys() != null && sessionItems.GetModifiedKeys().Count != 0)
-            {
-                foreach (string key in sessionItems.GetModifiedKeys())
-                {
-                    list.Add(key);
-                    list.Add(GetBytesFromObject(sessionItems.GetDataWithoutUpdatingModifiedKeys(key)));
-                    noOfItemsUpdated++;
-                }
-            }
             return noOfItemsUpdated;
         }
 
         public List<object> GetNewItemsAsList(ChangeTrackingSessionStateItemCollection sessionItems)
         {
             List<object> list = new List<object>(sessionItems.Keys.Count * 2);
-            foreach (string key in sessionItems.Keys)
-            {
-                list.Add(key);
-                list.Add(GetBytesFromObject(sessionItems.GetDataWithoutUpdatingModifiedKeys(key)));
-            }
             return list;
-        }
-
-        internal byte[] GetBytesFromObject(object data)
-        {
-            return _serializer.Serialize(data);
-        }
-
-        internal object GetObjectFromBytes(byte[] dataAsBytes)
-        {
-            return _serializer.Deserialize(dataAsBytes);
         }
     }
 }

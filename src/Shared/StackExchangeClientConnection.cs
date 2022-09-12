@@ -14,13 +14,11 @@ namespace Microsoft.Web.Redis
     {
 
         ProviderConfiguration _configuration;
-        RedisUtility _redisUtility;
         RedisSharedConnection _sharedConnection;
 
-        public StackExchangeClientConnection(ProviderConfiguration configuration, RedisUtility redisUtility, RedisSharedConnection sharedConnection)
+        public StackExchangeClientConnection(ProviderConfiguration configuration, RedisSharedConnection sharedConnection)
         {
             _configuration = configuration;
-            _redisUtility = redisUtility;
             _sharedConnection = sharedConnection;
         }
 
@@ -172,7 +170,7 @@ namespace Microsoft.Web.Redis
             RedisResult[] lockScriptReturnValueArray = (RedisResult[])rowDataAsRedisResult;
             Debug.Assert(lockScriptReturnValueArray != null);
 
-            ChangeTrackingSessionStateItemCollection sessionData = null;
+            SessionStateItemCollection sessionData = null;
             if (lockScriptReturnValueArray.Length > 1 && lockScriptReturnValueArray[1] != null)
             {
                 RedisResult[] data = (RedisResult[])lockScriptReturnValueArray[1];
@@ -181,7 +179,7 @@ namespace Microsoft.Web.Redis
                 // This list has to be even because it contains pair of <key, value> as {key, value, key, value}
                 if (data != null && data.Length != 0 && data.Length % 2 == 0)
                 {
-                    sessionData = new ChangeTrackingSessionStateItemCollection(_redisUtility);
+                    sessionData = new SessionStateItemCollection();
                     // In every cycle of loop we are getting one pair of key value and putting it into session items
                     // thats why increment is by 2 because we want to move to next pair
                     for (int i = 0; (i + 1) < data.Length; i += 2)
@@ -189,7 +187,6 @@ namespace Microsoft.Web.Redis
                         string key = (string) data[i];
                         if (key != null)
                         {
-                            sessionData.SetDataWithoutUpdatingModifiedKeys(key, (byte[])data[i + 1]);
                         }
                     }
                 }
