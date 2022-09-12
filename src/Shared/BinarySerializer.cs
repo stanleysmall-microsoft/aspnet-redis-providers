@@ -12,10 +12,6 @@ namespace Microsoft.Web.Redis
     {
         public byte[] Serialize(object data)
         {
-            if (data == null)
-            {
-                data = new RedisNull();
-            }
             var binaryFormatter = new BinaryFormatter();
             using (var memoryStream = new MemoryStream())
             {
@@ -36,10 +32,6 @@ namespace Microsoft.Web.Redis
             {
                 memoryStream.Seek(0, SeekOrigin.Begin);
                 object retObject = (object)binaryFormatter.Deserialize(memoryStream);
-                if (retObject.GetType() == typeof(RedisNull))
-                {
-                    return null;
-                }
                 return retObject;
             }
         }
