@@ -54,40 +54,16 @@ namespace Microsoft.Web.Redis
             }
         }
 
-        /*-------Start of UpdateExpiryTime operation-----------------------------------------------------------------------------------------------------------------------------------------------*/
-
-        // KEYS[1] = = data-id, internal-id
-        // ARGV[1] = session-timeout
-        // this order should not change LUA script depends on it
-        // if data doesn't exists then do nothing
-        private static readonly string updateExpiryTimeScript = (@"
-                local dataExists = redis.call('EXISTS', KEYS[1])
-                if dataExists == 0 then
-                    return 1;
-                end
-
-                local SessionTimeout = redis.call('GET', KEYS[2])
-                if SessionTimeout ~= false then
-                    redis.call('EXPIRE',KEYS[1], SessionTimeout)
-                    redis.call('EXPIRE',KEYS[2], SessionTimeout)
-                else
-                    redis.call('EXPIRE',KEYS[1],ARGV[1])
-                    redis.call('SET', KEYS[2], ARGV[1])
-                    redis.call('EXPIRE',KEYS[2],ARGV[1])
-                end
-                return 1"
-                );
-
         public void UpdateExpiryTime(int timeToExpireInSeconds)
         {
-            string[] keyArgs = new string[] { Keys.DataKey, Keys.InternalKey };
-            object[] valueArgs = new object[1];
-            valueArgs[0] = timeToExpireInSeconds;
+            string[] keyArgs = new string[] { Keys.LockKey, Keys.DataKey, Keys.InternalKey };
+            object[] valueArgs = new object[] { 0, 0 };
 
-            redisConnection.Eval(updateExpiryTimeScript, keyArgs, valueArgs);
+            object rowDataFromRedis = redisConnection.Eval(writeLockAndGetDataScript, keyArgs, valueArgs);
+            var sessionTimeout = redisConnection.GetSessionTimeout(rowDataFromRedis);
+            redisConnection.Expiry(Keys.DataKey, sessionTimeout);
+            redisConnection.Expiry(Keys.InternalKey, sessionTimeout);
         }
-
-        /*-------End of UpdateExpiryTime operation-----------------------------------------------------------------------------------------------------------------------------------------------*/
 
         /*-------Start of Set operation-----------------------------------------------------------------------------------------------------------------------------------------------*/
 
