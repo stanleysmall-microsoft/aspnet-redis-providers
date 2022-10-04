@@ -206,11 +206,26 @@ namespace Microsoft.Web.Redis
             OperationExecutor(() => RealConnection.StringSet(redisKey, redisValue, timeSpanForExpiry));
         }
 
+        public void SetInt(string key, int data, DateTime utcExpiry)
+        {
+            RedisKey redisKey = key;
+            RedisValue redisValue = data;
+            TimeSpan timeSpanForExpiry = utcExpiry - DateTime.UtcNow;
+            OperationExecutor(() => RealConnection.StringSet(redisKey, redisValue, timeSpanForExpiry));
+        }
+
         public byte[] Get(string key)
         {
             RedisKey redisKey = key;
             RedisValue redisValue = (RedisValue)OperationExecutor(() => RealConnection.StringGet(redisKey));
             return (byte[])redisValue;
+        }
+
+        public string GetString(string key)
+        {
+            RedisKey redisKey = key;
+            RedisValue redisValue = (RedisValue)OperationExecutor(() => RealConnection.StringGet(redisKey));
+            return redisValue;
         }
 
         public void Remove(string key)
