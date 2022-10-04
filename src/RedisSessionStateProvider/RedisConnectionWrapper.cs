@@ -261,26 +261,21 @@ namespace Microsoft.Web.Redis
 
         /*-------End of Lock release operation-----------------------------------------------------------------------------------------------------------------------------------------------*/
 
-        // KEYS = { write-lock-id, data-id, internal-id}
-        // ARGV = { write-lock-value }
-        private static readonly string removeSessionScript = (@"
-                if ARGV[1] ~= '' then
-                    local lockValue = redis.call('GET',KEYS[1])
-                    if lockValue ~=  ARGV[1] then
-                        return 1
-                    end
-                end
-                redis.call('DEL',KEYS[2])
-                redis.call('DEL',KEYS[3])
-                redis.call('DEL',KEYS[1])
-                ");
-
         public void TryRemoveAndReleaseLock(object lockId)
         {
-            string[] keyArgs = { Keys.LockKey, Keys.DataKey, Keys.InternalKey };
+            string[] keyArgs = new string[] { Keys.LockKey, Keys.DataKey, Keys.InternalKey };
+            object[] valueArgs = new object[] { };
+
+            object rowDataFromRedis = redisConnection.Eval(readLockAndGetDataScript, keyArgs, valueArgs);
+
             lockId = lockId ?? "";
-            object[] valueArgs = { lockId.ToString() };
-            redisConnection.Eval(removeSessionScript, keyArgs, valueArgs);
+
+            if (redisConnection.GetLockId(rowDataFromRedis).Equals(lockId.ToString()))
+            {
+                redisConnection.Remove(Keys.LockKey);
+                redisConnection.Remove(Keys.DataKey);
+                redisConnection.Remove(Keys.InternalKey);
+            }
         }
 
         /*-------Start of TryUpdate operation-----------------------------------------------------------------------------------------------------------------------------------------------*/
