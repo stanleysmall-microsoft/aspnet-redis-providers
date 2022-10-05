@@ -58,22 +58,6 @@ namespace Microsoft.Web.Redis
             redisConnection.Expiry(Keys.InternalKey, timeToExpireInSeconds);
         }
 
-        private byte[] SerializeSessionStateItemCollection(ISessionStateItemCollection sessionStateItemCollection)
-        {
-            try
-            {
-                MemoryStream ms = new MemoryStream();
-                BinaryWriter writer = new BinaryWriter(ms);
-                ((SessionStateItemCollection)sessionStateItemCollection).Serialize(writer);
-                writer.Close();
-                return ms.ToArray();
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         public void Set(ISessionStateItemCollection data, int sessionTimeout)
         {
             var expiry = DateTime.UtcNow.AddSeconds(sessionTimeout);
@@ -178,6 +162,22 @@ namespace Microsoft.Web.Redis
             {
                 Set(data, sessionTimeout);
                 redisConnection.Remove(Keys.LockKey);
+            }
+        }
+
+        private byte[] SerializeSessionStateItemCollection(ISessionStateItemCollection sessionStateItemCollection)
+        {
+            try
+            {
+                MemoryStream ms = new MemoryStream();
+                BinaryWriter writer = new BinaryWriter(ms);
+                ((SessionStateItemCollection)sessionStateItemCollection).Serialize(writer);
+                writer.Close();
+                return ms.ToArray();
+            }
+            catch
+            {
+                return null;
             }
         }
 
