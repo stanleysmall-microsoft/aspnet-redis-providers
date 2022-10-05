@@ -12,26 +12,16 @@ namespace Microsoft.Web.Redis
     {
         bool Expiry(string key, int timeInSeconds);
 
-        object Eval(string script, string[] keyArgs, object[] valueArgs);
-
-        string GetLockId(object rowDataFromRedis);
-
-        int GetSessionTimeout(object rowDataFromRedis);
-
-        bool IsLocked(object rowDataFromRedis);
-
-        ISessionStateItemCollection GetSessionData(object rowDataFromRedis);
-
         void Set(string key, byte[] data, DateTime utcExpiry);
 
         void SetInt(string key, int data, DateTime utcExpiry);
+
+        void SetString(string key, string data, int timeInSeconds);
 
         byte[] Get(string key);
 
         string GetString(string key);
 
         void Remove(string key);
-
-        byte[] GetOutputCacheDataFromResult(object rowDataFromRedis);
     }
 }

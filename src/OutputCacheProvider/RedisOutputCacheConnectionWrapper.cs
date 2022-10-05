@@ -35,34 +35,21 @@ namespace Microsoft.Web.Redis
             redisConnection = new StackExchangeClientConnection(configuration, sharedConnection);
         }
 
-        /*-------Start of Add operation-----------------------------------------------------------------------------------------------------------------------------------------------*/
-
-        // KEYS = { key }
-        // ARGV = { page data, expiry time in miliseconds }
-        // retArray = { page data from cache or new }
-        private static readonly string addScript = (@"
-                    local retVal = redis.call('GET',KEYS[1])
-                    if retVal == false then
-                       redis.call('PSETEX',KEYS[1],ARGV[2],ARGV[1])
-                       retVal = ARGV[1]
-                    end
-                    return retVal
-                    ");
-
         public object Add(string key, object entry, DateTime utcExpiry)
         {
             key = GetKeyForRedis(key);
-            TimeSpan expiryTime = utcExpiry - DateTime.UtcNow;
-            string[] keyArgs = new string[] { key };
-            object[] valueArgs = new object[] {
-                SerializeOutputCacheEntry(entry),
-                (long) expiryTime.TotalMilliseconds };
 
-            object rowDataFromRedis = redisConnection.Eval(addScript, keyArgs, valueArgs);
-            return DeserializeOutputCacheEntry((byte[])rowDataFromRedis);
+            var result = redisConnection.Get(key);
+            if (result != null)
+            {
+                return DeserializeOutputCacheEntry(result);
+            }
+            else
+            {
+                redisConnection.Set(key, SerializeOutputCacheEntry(entry), utcExpiry);
+                return entry;
+            }
         }
-
-        /*-------End of Add operation-----------------------------------------------------------------------------------------------------------------------------------------------*/
 
         public void Set(string key, object entry, DateTime utcExpiry)
         {

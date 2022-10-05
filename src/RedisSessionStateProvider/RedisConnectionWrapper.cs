@@ -4,7 +4,6 @@
 //
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Web.SessionState;
 
@@ -13,12 +12,12 @@ namespace Microsoft.Web.Redis
     internal class RedisConnectionWrapper : ICacheConnection
     {
         internal static RedisSharedConnection sharedConnection;
-        private static object lockForSharedConnection = new object();
+        private static readonly object lockForSharedConnection = new object();
 
         public KeyGenerator Keys { set; get; }
 
         internal IRedisClientConnection redisConnection;
-        private ProviderConfiguration configuration;
+        private readonly ProviderConfiguration configuration;
 
         public RedisConnectionWrapper(ProviderConfiguration configuration, string id)
         {
@@ -43,8 +42,7 @@ namespace Microsoft.Web.Redis
         {
             // This method do not use redis
             string lockDateTimeTicksFromLockId = lockId.ToString();
-            long lockTimeTicks;
-            if (long.TryParse(lockDateTimeTicksFromLockId, out lockTimeTicks))
+            if (long.TryParse(lockDateTimeTicksFromLockId, out long lockTimeTicks))
             {
                 return DateTime.Now.Subtract(new DateTime(lockTimeTicks));
             }
@@ -56,13 +54,8 @@ namespace Microsoft.Web.Redis
 
         public void UpdateExpiryTime(int timeToExpireInSeconds)
         {
-            string[] keyArgs = new string[] { Keys.LockKey, Keys.DataKey, Keys.InternalKey };
-            object[] valueArgs = new object[] { 0, 0 };
-
-            object rowDataFromRedis = redisConnection.Eval(writeLockAndGetDataScript, keyArgs, valueArgs);
-            var sessionTimeout = redisConnection.GetSessionTimeout(rowDataFromRedis);
-            redisConnection.Expiry(Keys.DataKey, sessionTimeout);
-            redisConnection.Expiry(Keys.InternalKey, sessionTimeout);
+            redisConnection.Expiry(Keys.DataKey, timeToExpireInSeconds);
+            redisConnection.Expiry(Keys.InternalKey, timeToExpireInSeconds);
         }
 
         private byte[] SerializeSessionStateItemCollection(ISessionStateItemCollection sessionStateItemCollection)
@@ -95,123 +88,65 @@ namespace Microsoft.Web.Redis
             }
         }
 
-        /*-------Start of Lock set operation-----------------------------------------------------------------------------------------------------------------------------------------------*/
-
-        // KEYS = { write-lock-id, data-id, internal-id }
-        // ARGV = { write-lock-value-that-we-want-to-set, request-timout }
-        // lockValue = 1) (Initially) write lock value that we want to set (ARGV[1]) if we get lock successfully this will return as retArray[1]
-        //             2) If another write lock exists than its lock value from cache
-        // retArray = {lockValue , session data if lock was taken successfully, session timeout value if exists, wheather lock was taken or not}
-        private static readonly string writeLockAndGetDataScript = (@"
-                local retArray = {}
-                local lockValue = ARGV[1]
-                local locked = redis.call('SETNX',KEYS[1],ARGV[1])
-                local IsLocked = true
-
-                if locked == 0 then
-                    lockValue = redis.call('GET',KEYS[1])
-                else
-                    redis.call('EXPIRE',KEYS[1],ARGV[2])
-                    IsLocked = false
-                end
-
-                retArray[1] = lockValue
-                if lockValue == ARGV[1] then retArray[2] = redis.call('GET',KEYS[2]) else retArray[2] = '' end
-
-                local SessionTimeout = redis.call('GET',KEYS[3])
-                if SessionTimeout ~= false then
-                    retArray[3] = SessionTimeout
-                    redis.call('EXPIRE',KEYS[2], SessionTimeout)
-                    redis.call('EXPIRE',KEYS[3], SessionTimeout)
-                else
-                    retArray[3] = '-1'
-                end
-
-                retArray[4] = IsLocked
-                return retArray
-                ");
-
         public bool TryTakeWriteLockAndGetData(DateTime lockTime, int lockTimeout, out object lockId, out ISessionStateItemCollection data, out int sessionTimeout)
         {
             string expectedLockId = lockTime.Ticks.ToString();
-            string[] keyArgs = new string[] { Keys.LockKey, Keys.DataKey, Keys.InternalKey };
-            object[] valueArgs = new object[] { expectedLockId, lockTimeout };
 
-            object rowDataFromRedis = redisConnection.Eval(writeLockAndGetDataScript, keyArgs, valueArgs);
+            bool isLocked = true;
+            lockId = redisConnection.GetString(Keys.LockKey) ?? "";
+            if (lockId.ToString().Equals(""))
+            {
+                isLocked = false;
+                redisConnection.SetString(Keys.LockKey, expectedLockId, lockTimeout);
+            }
 
             bool ret = false;
             data = null;
 
-            lockId = redisConnection.GetLockId(rowDataFromRedis);
-            sessionTimeout = redisConnection.GetSessionTimeout(rowDataFromRedis);
-            bool isLocked = redisConnection.IsLocked(rowDataFromRedis);
+            lockId = redisConnection.GetString(Keys.LockKey) ?? "";
+            var result = redisConnection.GetString(Keys.InternalKey) ?? "0";
+            sessionTimeout = int.Parse(result);
             if (!isLocked && lockId.ToString().Equals(expectedLockId))
             {
                 ret = true;
-                data = redisConnection.GetSessionData(rowDataFromRedis);
+                data = DeserializeSessionStateItemCollection(redisConnection.Get(Keys.DataKey));
             }
             return ret;
         }
-
-        // KEYS = { write-lock-id, data-id, internal-id }
-        // ARGV = { }
-        // lockValue = 1) (Initially) read lock value that we want to set (ARGV[1]) if we get lock successfully this will return as retArray[1]
-        //             3) If write lock exists than its lock value from cache
-        // retArray = {lockValue , session data if lock does not exist}
-        private static readonly string readLockAndGetDataScript = (@"
-                    local retArray = {}
-                    local lockValue = ''
-                    local writeLockValue = redis.call('GET',KEYS[1])
-                    if writeLockValue ~= false then
-                       lockValue = writeLockValue
-                    end
-                    retArray[1] = lockValue
-                    if lockValue == '' then retArray[2] = redis.call('GET',KEYS[2]) else retArray[2] = '' end
-
-                    local SessionTimeout = redis.call('GET', KEYS[3])
-                    if SessionTimeout ~= false then
-                        retArray[3] = SessionTimeout
-                        redis.call('EXPIRE',KEYS[2], SessionTimeout)
-                        redis.call('EXPIRE',KEYS[3], SessionTimeout)
-                    else
-                        retArray[3] = '-1'
-                    end
-                    return retArray
-                    ");
 
         public bool TryCheckWriteLockAndGetData(out object lockId, out ISessionStateItemCollection data, out int sessionTimeout)
         {
-            string[] keyArgs = new string[] { Keys.LockKey, Keys.DataKey, Keys.InternalKey };
-            object[] valueArgs = new object[] { };
-
-            object rowDataFromRedis = redisConnection.Eval(readLockAndGetDataScript, keyArgs, valueArgs);
-
             bool ret = false;
             data = null;
 
-            lockId = LockId();
-            sessionTimeout = SessionTimeout();
+            lockId = redisConnection.GetString(Keys.LockKey) ?? "";
+            var result = redisConnection.GetString(Keys.InternalKey) ?? "0";
+            sessionTimeout = int.Parse(result);
             if (lockId.ToString().Equals(""))
             {
                 ret = true;
-                data = redisConnection.GetSessionData(rowDataFromRedis);
+                data = DeserializeSessionStateItemCollection(redisConnection.Get(Keys.DataKey));
+                lockId = null;
             }
             return ret;
         }
-
-        /*-------End of Lock set operation-----------------------------------------------------------------------------------------------------------------------------------------------*/
 
         public void TryReleaseLockIfLockIdMatch(object lockId, int sessionTimeout)
         {
             lockId = lockId ?? "";
+            var realLockId = redisConnection.GetString(Keys.LockKey) ?? "";
 
-            if (LockId().Equals(lockId.ToString()))
+            if (realLockId.Equals(lockId.ToString()))
             {
                 redisConnection.Remove(Keys.LockKey);
-                if (SessionTimeout() != 0)
+
+                var result = redisConnection.GetString(Keys.InternalKey) ?? "0";
+                var realSessionTimeout = int.Parse(result);
+
+                if (realSessionTimeout != 0)
                 {
-                    redisConnection.Expiry(Keys.DataKey, SessionTimeout());
-                    redisConnection.Expiry(Keys.InternalKey, SessionTimeout());
+                    redisConnection.Expiry(Keys.DataKey, realSessionTimeout);
+                    redisConnection.Expiry(Keys.InternalKey, realSessionTimeout);
                 }
                 else
                 {
@@ -224,8 +159,9 @@ namespace Microsoft.Web.Redis
         public void TryRemoveAndReleaseLock(object lockId)
         {
             lockId = lockId ?? "";
+            var realLockId = redisConnection.GetString(Keys.LockKey) ?? "";
 
-            if (LockId().Equals(lockId.ToString()))
+            if (realLockId.Equals(lockId.ToString()))
             {
                 redisConnection.Remove(Keys.LockKey);
                 redisConnection.Remove(Keys.DataKey);
@@ -236,32 +172,27 @@ namespace Microsoft.Web.Redis
         public void TryUpdateAndReleaseLock(object lockId, ISessionStateItemCollection data, int sessionTimeout)
         {
             lockId = lockId ?? "";
+            var realLockId = redisConnection.GetString(Keys.LockKey) ?? "";
 
-            if (LockId().Equals(lockId.ToString()))
+            if (realLockId.Equals(lockId.ToString()))
             {
                 Set(data, sessionTimeout);
                 redisConnection.Remove(Keys.LockKey);
             }
         }
 
-        private string LockId()
+        private SessionStateItemCollection DeserializeSessionStateItemCollection(byte[] serializedSessionStateItemCollection)
         {
-            string[] keyArgs = new string[] { Keys.LockKey, Keys.DataKey, Keys.InternalKey };
-            object[] valueArgs = new object[] { };
-
-            object rowDataFromRedis = redisConnection.Eval(readLockAndGetDataScript, keyArgs, valueArgs);
-
-            return redisConnection.GetLockId(rowDataFromRedis);
-        }
-
-        private int SessionTimeout()
-        {
-            string[] keyArgs = new string[] { Keys.LockKey, Keys.DataKey, Keys.InternalKey };
-            object[] valueArgs = new object[] { };
-
-            object rowDataFromRedis = redisConnection.Eval(readLockAndGetDataScript, keyArgs, valueArgs);
-
-            return redisConnection.GetSessionTimeout(rowDataFromRedis);
+            try
+            {
+                MemoryStream ms = new MemoryStream(serializedSessionStateItemCollection);
+                BinaryReader reader = new BinaryReader(ms);
+                return SessionStateItemCollection.Deserialize(reader);
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }
