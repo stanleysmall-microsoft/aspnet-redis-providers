@@ -35,36 +35,6 @@ namespace Microsoft.Web.Redis
             return (bool)RetryLogic(() => RealConnection.KeyExpire(redisKey, timeSpan));
         }
 
-        public object Eval(string script, string[] keyArgs, object[] valueArgs)
-        {
-            RedisKey[] redisKeyArgs = new RedisKey[keyArgs.Length];
-            RedisValue[] redisValueArgs = new RedisValue[valueArgs.Length];
-
-            int i = 0;
-            foreach (string key in keyArgs)
-            {
-                redisKeyArgs[i] = key;
-                i++;
-            }
-
-            i = 0;
-            foreach (object val in valueArgs)
-            {
-                if (val.GetType() == typeof(byte[]))
-                {
-                    // User data is always in bytes
-                    redisValueArgs[i] = (byte[])val;
-                }
-                else
-                {
-                    // Internal data like session timeout and indexes are stored as strings
-                    redisValueArgs[i] = val.ToString();
-                }
-                i++;
-            }
-            return RetryLogic(() => RealConnection.ScriptEvaluate(script, redisKeyArgs, redisValueArgs));
-        }
-
         private object OperationExecutor(Func<object> redisOperation)
         {
             try
@@ -131,78 +101,27 @@ namespace Microsoft.Web.Redis
             }
         }
 
-        public int GetSessionTimeout(object rowDataFromRedis)
-        {
-            RedisResult rowDataAsRedisResult = (RedisResult)rowDataFromRedis;
-            RedisResult[] lockScriptReturnValueArray = (RedisResult[])rowDataAsRedisResult;
-            Debug.Assert(lockScriptReturnValueArray != null);
-            Debug.Assert(lockScriptReturnValueArray[2] != null);
-            int sessionTimeout = (int)lockScriptReturnValueArray[2];
-            if (sessionTimeout == -1)
-            {
-                sessionTimeout = (int)_configuration.SessionTimeout.TotalSeconds;
-            }
-            // converting seconds to minutes
-            sessionTimeout = sessionTimeout / 60;
-            return sessionTimeout;
-        }
-
-        public bool IsLocked(object rowDataFromRedis)
-        {
-            RedisResult rowDataAsRedisResult = (RedisResult)rowDataFromRedis;
-            RedisResult[] lockScriptReturnValueArray = (RedisResult[])rowDataAsRedisResult;
-            Debug.Assert(lockScriptReturnValueArray != null);
-            Debug.Assert(lockScriptReturnValueArray[3] != null);
-            return (bool)lockScriptReturnValueArray[3];
-        }
-
-        public string GetLockId(object rowDataFromRedis)
-        {
-            RedisResult rowDataAsRedisResult = (RedisResult)rowDataFromRedis;
-            RedisResult[] lockScriptReturnValueArray = (RedisResult[])rowDataAsRedisResult;
-            Debug.Assert(lockScriptReturnValueArray != null);
-            return (string)lockScriptReturnValueArray[0];
-        }
-
-        public ISessionStateItemCollection GetSessionData(object rowDataFromRedis)
-        {
-            RedisResult rowDataAsRedisResult = (RedisResult)rowDataFromRedis;
-            RedisResult[] lockScriptReturnValueArray = (RedisResult[])rowDataAsRedisResult;
-            Debug.Assert(lockScriptReturnValueArray != null);
-
-            SessionStateItemCollection sessionData = null;
-            if (lockScriptReturnValueArray.Length > 1 && lockScriptReturnValueArray[1] != null)
-            {
-                RedisResult data = lockScriptReturnValueArray[1];
-                var serializedSessionStateItemCollection = data;
-
-                if (serializedSessionStateItemCollection != null)
-                {
-                    sessionData = DeserializeSessionStateItemCollection(serializedSessionStateItemCollection);
-                }
-            }
-            return sessionData;
-        }
-
-        private SessionStateItemCollection DeserializeSessionStateItemCollection(RedisResult serializedSessionStateItemCollection)
-        {
-            try
-            {
-                MemoryStream ms = new MemoryStream((byte[])serializedSessionStateItemCollection);
-                BinaryReader reader = new BinaryReader(ms);
-                return SessionStateItemCollection.Deserialize(reader);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         public void Set(string key, byte[] data, DateTime utcExpiry)
         {
             RedisKey redisKey = key;
             RedisValue redisValue = data;
             TimeSpan timeSpanForExpiry = utcExpiry - DateTime.UtcNow;
+            OperationExecutor(() => RealConnection.StringSet(redisKey, redisValue, timeSpanForExpiry));
+        }
+
+        public void SetInt(string key, int data, DateTime utcExpiry)
+        {
+            RedisKey redisKey = key;
+            RedisValue redisValue = data;
+            TimeSpan timeSpanForExpiry = utcExpiry - DateTime.UtcNow;
+            OperationExecutor(() => RealConnection.StringSet(redisKey, redisValue, timeSpanForExpiry));
+        }
+
+        public void SetString(string key, string data, int timeInSeconds)
+        {
+            RedisKey redisKey = key;
+            RedisValue redisValue = data;
+            TimeSpan timeSpanForExpiry = new TimeSpan(0, 0, timeInSeconds);
             OperationExecutor(() => RealConnection.StringSet(redisKey, redisValue, timeSpanForExpiry));
         }
 
@@ -213,16 +132,17 @@ namespace Microsoft.Web.Redis
             return (byte[])redisValue;
         }
 
+        public string GetString(string key)
+        {
+            RedisKey redisKey = key;
+            RedisValue redisValue = (RedisValue)OperationExecutor(() => RealConnection.StringGet(redisKey));
+            return redisValue;
+        }
+
         public void Remove(string key)
         {
             RedisKey redisKey = key;
             OperationExecutor(() => RealConnection.KeyDelete(redisKey));
-        }
-
-        public byte[] GetOutputCacheDataFromResult(object rowDataFromRedis)
-        {
-            RedisResult rowDataAsRedisResult = (RedisResult)rowDataFromRedis;
-            return (byte[])rowDataAsRedisResult;
         }
     }
 }
